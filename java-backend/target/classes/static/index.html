@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>车牌识别演示</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: Arial, sans-serif; margin: 24px; background: #f7f8fa; color: #1f1f1f; }
+    h2 { margin-bottom: 12px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.04); }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .col { flex: 1 1 320px; }
+    button { padding: 8px 16px; border: none; background: #2563eb; color: #fff; border-radius: 6px; cursor: pointer; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    input[type="file"] { margin: 8px 0 12px; }
+    img, canvas { max-width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; }
+    .result { margin-top: 8px; font-size: 14px; }
+    .error { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div id="app" class="card">
+    <h2>车牌识别演示（Java 网关 + Python 识别）</h2>
+    <div class="row">
+      <div class="col">
+        <div>
+          <input type="file" accept="image/*" @change="onFileChange" />
+        </div>
+        <button :disabled="!file || loading" @click="recognize">
+          {{ loading ? '识别中...' : '上传并识别' }}
+        </button>
+        <div class="result" v-if="message" :class="{ error: isError }">{{ message }}</div>
+        <div style="margin-top:12px;">
+          <img ref="previewImg" :src="previewUrl" alt="预览" v-if="previewUrl" />
+          <canvas ref="canvas" v-show="previewUrl"></canvas>
+        </div>
+      </div>
+      <div class="col">
+        <h4>识别结果</h4>
+        <div class="result">
+          <div>文字：{{ result?.text || '-' }}</div>
+          <div>耗时：{{ result?.elapsedMs ? result.elapsedMs + ' ms' : '-' }}</div>
+          <div>框数：{{ result?.boxes ? result.boxes.length : 0 }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp, ref, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        const file = ref(null);
+        const previewUrl = ref('');
+        const result = ref(null);
+        const message = ref('');
+        const isError = ref(false);
+        const loading = ref(false);
+        const previewImg = ref(null);
+        const canvas = ref(null);
+
+        const onFileChange = (e) => {
+          const f = e.target.files[0];
+          file.value = f;
+          result.value = null;
+          message.value = '';
+          isError.value = false;
+          if (f) {
+            previewUrl.value = URL.createObjectURL(f);
+            nextTick(() => {
+              drawBoxes([]);
+            });
+          } else {
+            previewUrl.value = '';
+          }
+        };
+
+        const recognize = async () => {
+          if (!file.value) { message.value = '请选择图片'; isError.value = true; return; }
+          loading.value = true;
+          message.value = '识别中...';
+          isError.value = false;
+          const formData = new FormData();
+          formData.append('file', file.value);
+          try {
+            const resp = await fetch('/api/plate/recognize', { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error('识别服务返回错误');
+            const data = await resp.json();
+            result.value = data;
+            message.value = '识别完成';
+            drawBoxes(data.boxes || []);
+          } catch (err) {
+            console.error(err);
+            message.value = '识别失败，请检查后端服务';
+            isError.value = true;
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const drawBoxes = (boxes) => {
+          if (!previewImg.value || !canvas.value) return;
+          const imgEl = previewImg.value;
+          const ctxCanvas = canvas.value;
+          ctxCanvas.width = imgEl.naturalWidth;
+          ctxCanvas.height = imgEl.naturalHeight;
+          const ctx = ctxCanvas.getContext('2d');
+          ctx.clearRect(0, 0, ctxCanvas.width, ctxCanvas.height);
+          ctx.drawImage(imgEl, 0, 0, ctxCanvas.width, ctxCanvas.height);
+          ctx.strokeStyle = 'lime';
+          ctx.lineWidth = 2;
+          boxes.forEach(b => {
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+          });
+        };
+
+        return { file, previewUrl, result, message, isError, loading, previewImg, canvas, onFileChange, recognize };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
