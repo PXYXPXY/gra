@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>车牌识别演示</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--bg-top: #eef7ff;
+			--bg-bottom: #fef8ef;
+			--surface: #ffffff;
+			--surface-soft: #f6f9fd;
+			--line: #d8e4f0;
+			--text-strong: #12263a;
+			--text-normal: #36516d;
+			--primary: #0a74da;
+			--primary-strong: #085db0;
+			--ok: #0b8f6a;
+			--danger: #c1392b;
+			--shadow: 0 14px 38px rgba(18, 38, 58, 0.12);
+			--radius-lg: 18px;
+			--radius-md: 12px;
+		}
+
+		* { box-sizing: border-box; }
+
+		body {
+			margin: 0;
+			min-height: 100vh;
+			font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+			color: var(--text-strong);
+			background:
+				radial-gradient(1200px 600px at 90% -10%, #d8ecff 0%, transparent 60%),
+				radial-gradient(1000px 520px at -10% 120%, #ffeccd 0%, transparent 62%),
+				linear-gradient(160deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+			padding: 28px 16px;
+		}
+
+		.shell {
+			max-width: 1120px;
+			margin: 0 auto;
+			animation: fadeUp 0.45s ease;
+		}
+
+		.hero {
+			margin-bottom: 16px;
+			padding: 18px 20px;
+			border: 1px solid var(--line);
+			border-radius: var(--radius-lg);
+			background: rgba(255, 255, 255, 0.7);
+			backdrop-filter: blur(8px);
+			box-shadow: var(--shadow);
+		}
+
+		.hero h1 {
+			margin: 0 0 6px;
+			font-size: clamp(22px, 2.5vw, 30px);
+			letter-spacing: 0.3px;
+		}
+
+		.hero p {
+			margin: 0;
+			color: var(--text-normal);
+			font-size: 14px;
+		}
+
+		.grid {
+			display: grid;
+			grid-template-columns: 1.2fr 0.8fr;
+			gap: 16px;
+		}
+
+		.panel {
+			border-radius: var(--radius-lg);
+			border: 1px solid var(--line);
+			background: var(--surface);
+			box-shadow: var(--shadow);
+			padding: 18px;
+		}
+
+		.upload-zone {
+			margin-top: 6px;
+			background: var(--surface-soft);
+			border: 2px dashed #9cc7f1;
+			border-radius: var(--radius-md);
+			padding: 20px 16px;
+			text-align: center;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 6px;
+			transition: all 0.25s ease;
+			cursor: pointer;
+			min-height: 108px;
+		}
+
+		.upload-zone:hover {
+			border-color: var(--primary);
+			background: #edf5ff;
+			transform: translateY(-1px);
+		}
+
+		.upload-zone strong {
+			display: block;
+			font-size: 15px;
+			line-height: 1.45;
+		}
+
+		.upload-zone span {
+			color: var(--text-normal);
+			font-size: 13px;
+			line-height: 1.45;
+			display: block;
+		}
+
+		input[type="file"] { display: none; }
+
+		.actions {
+			margin-top: 12px;
+			display: flex;
+			gap: 10px;
+			align-items: center;
+			flex-wrap: wrap;
+		}
+
+		.btn {
+			border: none;
+			border-radius: 999px;
+			padding: 10px 18px;
+			background: linear-gradient(135deg, var(--primary), #2b8ae8);
+			color: #fff;
+			font-weight: 600;
+			cursor: pointer;
+			transition: transform 0.2s ease, box-shadow 0.2s ease;
+			box-shadow: 0 8px 18px rgba(10, 116, 218, 0.28);
+		}
+
+		.btn:hover { transform: translateY(-1px); }
+
+		.btn:disabled {
+			background: #9db5cc;
+			box-shadow: none;
+			cursor: not-allowed;
+			transform: none;
+		}
+
+		.btn.secondary {
+			background: #e6eef7;
+			color: #21425f;
+			box-shadow: none;
+			border: 1px solid #c5d7ea;
+		}
+
+		.btn.secondary:hover {
+			background: #dce8f4;
+			transform: translateY(-1px);
+		}
+
+		.tip {
+			font-size: 13px;
+			color: var(--text-normal);
+		}
+
+		.tip.error {
+			color: var(--danger);
+			font-weight: 600;
+		}
+
+		.preview-wrap {
+			margin-top: 14px;
+			border-radius: var(--radius-md);
+			overflow: hidden;
+			border: 1px solid var(--line);
+			background: #fff;
+			min-height: 220px;
+			display: grid;
+			place-items: center;
+		}
+
+		canvas {
+			display: block;
+			max-width: 100%;
+			height: auto;
+		}
+
+		.preview-placeholder {
+			color: #6f88a1;
+			font-size: 14px;
+			padding: 12px;
+			text-align: center;
+		}
+
+		.panel h3 {
+			margin: 0 0 12px;
+			font-size: 18px;
+		}
+
+		.stats {
+			display: grid;
+			gap: 10px;
+		}
+
+		.stat-item {
+			border: 1px solid var(--line);
+			border-radius: 10px;
+			padding: 10px 12px;
+			background: linear-gradient(180deg, #fdfefe 0%, #f4f8fc 100%);
+		}
+
+		.stat-item b {
+			display: block;
+			margin-bottom: 4px;
+			font-size: 12px;
+			color: #5a7691;
+			font-weight: 600;
+			letter-spacing: 0.2px;
+		}
+
+		.stat-item span {
+			font-size: 20px;
+			font-weight: 700;
+			color: #16324a;
+			word-break: break-all;
+		}
+
+		.process-section {
+			margin-top: 14px;
+			border-top: 1px dashed #d2deea;
+			padding-top: 12px;
+		}
+
+		.process-title {
+			margin: 0 0 10px;
+			font-size: 14px;
+			color: #385875;
+			font-weight: 700;
+		}
+
+		.process-grid {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 10px;
+			max-height: 760px;
+			overflow: auto;
+			padding-right: 2px;
+		}
+
+		.process-card {
+			border: 1px solid var(--line);
+			border-radius: 10px;
+			padding: 8px;
+			background: #f9fcff;
+		}
+
+		.process-card b {
+			display: block;
+			font-size: 12px;
+			margin-bottom: 6px;
+			color: #4a6683;
+		}
+
+		.process-card img {
+			display: block;
+			width: 100%;
+			height: 220px;
+			object-fit: contain;
+			border-radius: 8px;
+			border: 1px solid #dbe6f2;
+			background: #fff;
+		}
+
+		.process-card .placeholder {
+			height: 220px;
+			display: grid;
+			place-items: center;
+			border-radius: 8px;
+			border: 1px dashed #c9d8e8;
+			background: #f7fbff;
+			color: #6c86a1;
+			font-size: 13px;
+		}
+
+		.status-chip {
+			display: inline-flex;
+			align-items: center;
+			padding: 6px 10px;
+			border-radius: 999px;
+			font-size: 12px;
+			background: #eaf6f2;
+			color: var(--ok);
+			margin-bottom: 10px;
+			border: 1px solid #bce6d8;
+		}
+
+		.status-chip.busy {
+			background: #fff3df;
+			color: #9c6a00;
+			border-color: #f6d598;
+		}
+
+		.help-fab {
+			position: fixed;
+			right: 20px;
+			bottom: 20px;
+			width: 48px;
+			height: 48px;
+			border-radius: 50%;
+			border: none;
+			color: #fff;
+			font-size: 22px;
+			font-weight: 700;
+			background: linear-gradient(140deg, #0c7de3, #1f5cb8);
+			box-shadow: 0 10px 18px rgba(12, 125, 227, 0.34);
+			cursor: pointer;
+		}
+
+		.help-fab:hover { transform: scale(1.03); }
+
+		.sr-only {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			border: 0;
+		}
+
+		@keyframes fadeUp {
+			from { opacity: 0; transform: translateY(8px); }
+			to { opacity: 1; transform: translateY(0); }
+		}
+
+		@media (max-width: 900px) {
+			body { padding: 16px 12px 80px; }
+			.grid { grid-template-columns: 1fr; }
+			.panel { padding: 14px; }
+			.stat-item span { font-size: 18px; }
+			.process-card img { height: 180px; }
+			.process-card .placeholder { height: 180px; }
+		}
+	</style>
+</head>
+<body>
+	<div id="app" class="shell">
+		<section class="hero">
+			<h1>车牌识别控制台</h1>
+			<p>Java 网关负责接入，Python 模型负责推理。上传车辆图片后可直接查看识别文本与检测框。</p>
+		</section>
+
+		<section class="grid">
+			<article class="panel">
+				<h3>图片上传</h3>
+				<label class="upload-zone" for="fileInput" v-if="!file">
+					<strong>{{ file ? '已选择：' + file.name : '点击上传图片' }}</strong>
+					<span>支持 JPG / PNG / WEBP，建议清晰正向车牌图像</span>
+				</label>
+				<input id="fileInput" ref="fileInput" type="file" accept="image/*" @change="onFileChange" />
+
+				<div class="actions">
+					<button class="btn secondary" v-if="file" @click="triggerFileSelect">重新选择图片</button>
+					<button class="btn" :disabled="!file || loading" @click="recognize">
+						{{ loading ? '识别中...' : '上传并识别' }}
+					</button>
+					<span class="tip" v-if="!message">准备就绪，等待识别</span>
+					<span class="tip" v-if="message" :class="{ error: isError }">{{ message }}</span>
+				</div>
+
+				<div class="preview-wrap">
+					<div class="preview-placeholder" v-if="!previewUrl">识别结果预览区域</div>
+					<img
+						ref="previewImg"
+						:src="previewUrl"
+						alt="预览"
+						v-if="previewUrl"
+						class="sr-only"
+						@load="onPreviewLoad"
+					/>
+					<canvas ref="canvas" v-show="previewUrl"></canvas>
+				</div>
+			</article>
+
+			<article class="panel">
+				<div class="status-chip" :class="{ busy: loading }">{{ loading ? '模型推理中' : '服务状态正常' }}</div>
+				<h3>识别结果</h3>
+				<div class="stats">
+					<div class="stat-item">
+						<b>车牌文本</b>
+						<span>{{ result?.text || '-' }}</span>
+					</div>
+					<div class="stat-item">
+						<b>推理耗时</b>
+						<span>{{ result?.elapsedMs ? result.elapsedMs + ' ms' : '-' }}</span>
+					</div>
+					<div class="stat-item">
+						<b>检测框数量</b>
+						<span>{{ result?.boxes ? result.boxes.length : 0 }}</span>
+					</div>
+					<div class="stat-item">
+						<b>定位置信度</b>
+						<span>{{ result?.bestBox?.conf != null ? result.bestBox.conf.toFixed(3) : '-' }}</span>
+					</div>
+					<div class="stat-item">
+						<b>定位来源</b>
+						<span>{{ result?.detector?.source || '-' }}</span>
+					</div>
+				</div>
+
+				<section class="process-section" v-if="result && orderedProcessImages.length">
+					<h4 class="process-title">分割/预处理过程图</h4>
+					<div class="process-grid">
+						<div class="process-card" v-for="item in orderedProcessImages" :key="item.key">
+							<b>{{ item.title }}</b>
+							<img v-if="item.src" :src="item.src" :alt="item.title" />
+							<div v-else class="placeholder">本次未生成该过程图</div>
+						</div>
+					</div>
+				</section>
+			</article>
+		</section>
+
+		<button
+			class="help-fab"
+			title="帮助"
+			@click="showHelp"
+		>?</button>
+	</div>
+
+	<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+	<script>
+		const { createApp, ref, nextTick, computed } = Vue;
+
+		createApp({
+			setup() {
+				const file = ref(null);
+				const previewUrl = ref('');
+				const result = ref(null);
+				const lastBoxes = ref([]);
+				const message = ref('');
+				const isError = ref(false);
+				const loading = ref(false);
+				const previewImg = ref(null);
+				const canvas = ref(null);
+				const fileInput = ref(null);
+				const processOrder = [
+					'01_yolo_raw_crop',
+					'02_plate_roi',
+					'03_preprocess_edges',
+					'03b_angle_binary',
+					'04_plate_deskew',
+					'05_plate_binary',
+					'06_plate_tight_crop',
+					'07_plate_normalized',
+					'07b_plate_sharpened',
+					'08_seg_binary',
+					'09_seg_peaks'
+				];
+
+				const processTitleMap = {
+					'01_yolo_raw_crop': 'YOLO原始裁剪',
+					'02_plate_roi': '定位车牌ROI',
+					'03_preprocess_edges': '预处理边缘图',
+					'03b_angle_binary': '角度估计二值图',
+					'04_plate_deskew': '车牌倾斜矫正',
+					'05_plate_binary': '车牌二值化',
+					'06_plate_tight_crop': '车牌紧致裁剪',
+					'07_plate_normalized': '车牌尺寸归一化',
+					'07b_plate_sharpened': '车牌轻微锐化',
+					'08_seg_binary': '字符分割二值图',
+					'09_seg_peaks': '字符分割波峰图'
+				};
+
+				const orderedProcessImages = computed(() => {
+					const images = (result.value && Array.isArray(result.value.processImages)) ? result.value.processImages : [];
+					const byKey = new Map(images.map(item => [item.key, item]));
+					const ordered = processOrder.map((key) => {
+						const item = byKey.get(key);
+						if (item) return item;
+						return {
+							key,
+							title: processTitleMap[key] || key,
+							src: '',
+							missing: true
+						};
+					});
+
+					const extras = images.filter(item => !processOrder.includes(item.key));
+					return ordered.concat(extras);
+				});
+
+				const onFileChange = (e) => {
+					const f = e.target.files[0];
+					if (previewUrl.value) {
+						URL.revokeObjectURL(previewUrl.value);
+					}
+					file.value = f;
+					result.value = null;
+					message.value = '';
+					isError.value = false;
+					if (f) {
+						previewUrl.value = URL.createObjectURL(f);
+						lastBoxes.value = [];
+						nextTick(() => drawBoxes([]));
+					} else {
+						previewUrl.value = '';
+						lastBoxes.value = [];
+					}
+				};
+
+				const triggerFileSelect = () => {
+					if (fileInput.value) fileInput.value.click();
+				};
+
+				const recognize = async () => {
+					if (!file.value) { message.value = '请选择图片'; isError.value = true; return; }
+					loading.value = true;
+					message.value = '识别中...';
+					isError.value = false;
+					const formData = new FormData();
+					formData.append('file', file.value);
+					try {
+						const resp = await fetch('/api/plate/recognize', { method: 'POST', body: formData });
+						if (!resp.ok) throw new Error('识别服务返回错误');
+						const data = await resp.json();
+						result.value = data;
+						lastBoxes.value = data.boxes || [];
+						message.value = '识别完成';
+						drawBoxes(lastBoxes.value);
+					} catch (err) {
+						console.error(err);
+						message.value = '识别失败，请检查后端服务';
+						isError.value = true;
+					} finally {
+						loading.value = false;
+					}
+				};
+
+				const onPreviewLoad = () => {
+					drawBoxes(lastBoxes.value || []);
+				};
+
+				const drawBoxes = (boxes) => {
+					if (!previewImg.value || !canvas.value) return;
+					const imgEl = previewImg.value;
+					const ctxCanvas = canvas.value;
+					ctxCanvas.width = imgEl.naturalWidth;
+					ctxCanvas.height = imgEl.naturalHeight;
+					const ctx = ctxCanvas.getContext('2d');
+					ctx.clearRect(0, 0, ctxCanvas.width, ctxCanvas.height);
+					ctx.drawImage(imgEl, 0, 0, ctxCanvas.width, ctxCanvas.height);
+					ctx.strokeStyle = '#00e07f';
+					ctx.lineWidth = 2;
+					boxes.forEach(b => {
+						ctx.strokeRect(b.x, b.y, b.w, b.h);
+						const conf = typeof b.conf === 'number' ? b.conf.toFixed(2) : '--';
+						const text = (b.label || 'plate') + ' ' + conf;
+						ctx.font = 'bold 16px "Microsoft YaHei"';
+						const textWidth = ctx.measureText(text).width;
+						const textX = b.x;
+						const textY = Math.max(16, b.y - 6);
+						ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+						ctx.fillRect(textX, textY - 16, textWidth + 8, 20);
+						ctx.fillStyle = '#ffffff';
+						ctx.fillText(text, textX + 4, textY);
+					});
+				};
+
+				const showHelp = () => {
+					alert('使用说明：\n1. 上传清晰车牌图片\n2. 点击“上传并识别”\n3. 查看右侧结果与检测框');
+				};
+
+				return {
+					file,
+					previewUrl,
+					result,
+					message,
+					isError,
+					loading,
+					orderedProcessImages,
+					previewImg,
+					canvas,
+					fileInput,
+					onFileChange,
+					triggerFileSelect,
+					recognize,
+					onPreviewLoad,
+					showHelp
+				};
+			}
+		}).mount('#app');
+	</script>
+</body>
+</html>
