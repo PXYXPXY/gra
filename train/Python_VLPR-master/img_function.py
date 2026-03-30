@@ -218,17 +218,12 @@ class CardPredictor:
 
     def _recognize_from_plate_roi(self, card_img, color):
         predict_result = []
-        self.last_debug_images.pop("04b_border_filled", None)
         self.last_debug_images.pop("08_seg_binary", None)
         self.last_debug_images.pop("09_seg_peaks", None)
         if card_img is None or card_img.size == 0:
             return predict_result
 
         gray_img = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
-
-        # 仅在分割前把旋转黑边改为白底，避免黑边干扰二值化与投影分割。
-        gray_img[gray_img < 5] = 255
-        self._set_debug_image("04b_border_filled", cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR))
 
         # 参考实现：黄绿车牌先反向，再做正向 OTSU 二值化。
         if color in ("green", "yello", "yellow"):
@@ -386,6 +381,25 @@ class CardPredictor:
             borderMode=cv2.BORDER_REPLICATE,
         )
 
+    def _estimate_skew_angle_traditional(self, plate_img):
+        gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return 0.0
+
+        cnt = max(contours, key=cv2.contourArea)
+        rect = cv2.minAreaRect(cnt)
+        angle = float(rect[-1])
+        if angle < -45:
+            angle += 90
+        if angle > 45:
+            angle -= 90
+        if abs(angle) > self.max_skew_correction_deg:
+            return 0.0
+        return angle
+
     def _tight_crop_plate(self, plate_img):
         # 禁用过度裁剪，始终返回原 ROI。
         return plate_img
@@ -419,9 +433,7 @@ class CardPredictor:
             return roi
 
         working = roi.copy()
-        _, temp_binary, edges = self._prepare_temp_angle_maps(working)
-        self._set_debug_image("03b_angle_binary", cv2.cvtColor(temp_binary, cv2.COLOR_GRAY2BGR))
-        angle = self._get_skew_angle_centroid_line(temp_binary)
+        angle = self._estimate_skew_angle_traditional(working)
         self.last_skew_angles = {"centroid": float(angle)}
 
         # 角度用于估计，但几何变换必须施加在彩色 ROI 上。
@@ -430,12 +442,7 @@ class CardPredictor:
         else:
             working = working
         self._set_debug_image("04_plate_deskew", working)
-
-        corrected_gray = cv2.cvtColor(working, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(corrected_gray, (3, 3), 0)
-        _, final_binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        final_binary = cv2.dilate(final_binary, kernel, iterations=1)
+        self._set_debug_image("04b_plate_deskew_refined", working)
 
         working = self._normalize_plate_size(working)
         self._set_debug_image("07_plate_normalized", working)
@@ -519,11 +526,8 @@ class CardPredictor:
 
         self._set_debug_image("01_yolo_raw_crop", roi)
 
-        roi = self._postprocess_yolo_plate_roi(roi)
-
-        colors, _ = img_math.img_color([roi.copy()])
-        card_color = colors[0] if len(colors) else "no"
-        return roi, card_color
+        # YOLO 只负责粗定位，后续细化定位由传统方法在该 ROI 内完成。
+        return roi, "no"
 
     def img_first_pre(self, car_pic_file):
         """
@@ -568,23 +572,38 @@ class CardPredictor:
         :return: 已经定位好的车牌
         """
 
-        # 优先使用 YOLO 进行定位：YOLO 分支应基于原始图，避免被预处理模糊影响。
+        # 使用 YOLO 粗定位，再在 YOLO ROI 内执行传统检测细化车牌区域。
         yolo_input = rawimg if rawimg is not None else oldimg
-        yolo_roi, yolo_color = self._detect_plate_with_yolo(yolo_input)
+        yolo_roi, _ = self._detect_plate_with_yolo(yolo_input)
         if yolo_roi is not None:
-            if yolo_color not in ("blue", "yello", "green"):
-                # YOLO 定位后颜色不稳定时，使用颜色分支回退识别。
-                yolo_colors, _ = img_math.img_color([yolo_roi.copy()])
-                yolo_color = yolo_colors[0] if len(yolo_colors) else "blue"
+            roi_edges, roi_old = self.img_first_pre(yolo_roi)
+            if roi_edges.any():
+                config.set_name(roi_edges)
 
-            if yolo_color in ("blue", "yello", "green"):
-                yolo_result = self._recognize_from_plate_roi(yolo_roi, yolo_color)
-                if len(yolo_result) > 0:
-                    self.last_pipeline_source = "yolo"
-                    return yolo_result, yolo_roi, yolo_color
+            pic_hight, pic_width = roi_edges.shape[:2]
+            card_contours = img_math.img_findContours(roi_edges)
+            card_imgs = img_math.img_Transform(card_contours, roi_old, pic_width, pic_hight)
+            colors, _ = img_math.img_color(card_imgs)
 
-        # 按当前策略仅使用 YOLO 做 ROI 定位；YOLO 无结果时不再回退传统定位。
-        self.last_pipeline_source = "yolo_only_no_result"
+            for i, color in enumerate(colors):
+                if color in ("blue", "yello", "green"):
+                    refined_card = self._postprocess_yolo_plate_roi(card_imgs[i])
+                    yolo_result = self._recognize_from_plate_roi(refined_card, color)
+                    if len(yolo_result) > 0:
+                        self.last_pipeline_source = "yolo_traditional"
+                        return yolo_result, refined_card, color
+
+            # 传统细化失败时，回退使用 YOLO ROI 直接识别，避免整张图无结果。
+            fallback_roi = self._postprocess_yolo_plate_roi(yolo_roi)
+            fallback_colors, _ = img_math.img_color([fallback_roi.copy()])
+            fallback_color = fallback_colors[0] if len(fallback_colors) else "blue"
+            if fallback_color in ("blue", "yello", "green"):
+                fallback_result = self._recognize_from_plate_roi(fallback_roi, fallback_color)
+                if len(fallback_result) > 0:
+                    self.last_pipeline_source = "yolo_fallback"
+                    return fallback_result, fallback_roi, fallback_color
+
+        self.last_pipeline_source = "yolo_traditional_no_result"
         return [], None, None  # 识别到的字符、定位的车牌图像、车牌颜色
 
     def img_only_color(self, filename, oldimg, img_contours):

@@ -23,9 +23,8 @@ predictor.train_svm()
 
 PROCESS_IMAGE_TITLES = {
     "01_yolo_raw_crop": "YOLO原始裁剪",
-    "03b_angle_binary": "角度估计二值图",
     "04_plate_deskew": "车牌倾斜矫正",
-    "04b_border_filled": "旋转后黑边填充",
+    "04b_plate_deskew_refined": "修改后旋转矫正图",
     "07_plate_normalized": "车牌尺寸归一化",
     "07b_plate_sharpened": "车牌轻微锐化",
     "08_seg_binary": "字符分割二值图",
