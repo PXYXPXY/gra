@@ -218,13 +218,17 @@ class CardPredictor:
 
     def _recognize_from_plate_roi(self, card_img, color):
         predict_result = []
+        self.last_debug_images.pop("04b_border_filled", None)
         self.last_debug_images.pop("08_seg_binary", None)
         self.last_debug_images.pop("09_seg_peaks", None)
         if card_img is None or card_img.size == 0:
             return predict_result
 
-        self._set_debug_image("02_plate_roi", card_img)
         gray_img = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
+
+        # 仅在分割前把旋转黑边改为白底，避免黑边干扰二值化与投影分割。
+        gray_img[gray_img < 5] = 255
+        self._set_debug_image("04b_border_filled", cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR))
 
         # 参考实现：黄绿车牌先反向，再做正向 OTSU 二值化。
         if color in ("green", "yello", "yellow"):
@@ -383,57 +387,8 @@ class CardPredictor:
         )
 
     def _tight_crop_plate(self, plate_img):
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-
-        binary, _ = self._prepare_plate_binary_edges(plate_img)
-
-        # 期望是黑底白字；若白色占比异常高，说明极可能是白底黑字，做一次反转纠正。
-        white_ratio = float(np.count_nonzero(binary)) / float(binary.size)
-        if white_ratio > 0.65:
-            binary = cv2.bitwise_not(binary)
-
-        h, w = binary.shape[:2]
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-
-        mask = np.zeros_like(binary)
-        min_area = max(6, int(h * w * 0.00035))
-        max_area = int(h * w * 0.35)
-        for i in range(1, num_labels):
-            area = int(stats[i, cv2.CC_STAT_AREA])
-            bw = int(stats[i, cv2.CC_STAT_WIDTH])
-            bh = int(stats[i, cv2.CC_STAT_HEIGHT])
-            if area < min_area or area > max_area or bw <= 0 or bh <= 0:
-                continue
-            ratio = bw / float(bh)
-            if ratio < 0.08 or ratio > 2.2:
-                continue
-            mask[labels == i] = 255
-
-        # 过滤后为空时，回退到原始二值白像素，保证不会因为过滤过严导致失效。
-        ys, xs = np.where(mask > 0)
-        if ys.size == 0 or xs.size == 0:
-            ys, xs = np.where(binary > 0)
-            if ys.size == 0 or xs.size == 0:
-                return plate_img
-
-        x1, x2 = int(xs.min()), int(xs.max())
-        y1, y2 = int(ys.min()), int(ys.max())
-
-        # 仅保留极小安全边界，避免边缘字符被整型边界截断。
-        safe_pad = 1
-        x1 = max(0, x1 - safe_pad)
-        y1 = max(0, y1 - safe_pad)
-        x2 = min(w - 1, x2 + safe_pad)
-        y2 = min(h - 1, y2 + safe_pad)
-
-        if x2 <= x1 or y2 <= y1:
-            return plate_img
-
-        cropped = plate_img[y1:y2 + 1, x1:x2 + 1]
-        if cropped.size == 0:
-            return plate_img
-        return cropped
+        # 禁用过度裁剪，始终返回原 ROI。
+        return plate_img
 
     def _normalize_plate_size(self, plate_img):
         target_w, target_h = self.plate_target_size
@@ -464,9 +419,7 @@ class CardPredictor:
             return roi
 
         working = roi.copy()
-        self._set_debug_image("02_plate_roi", working)
         _, temp_binary, edges = self._prepare_temp_angle_maps(working)
-        self._set_debug_image("03_preprocess_edges", cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR))
         self._set_debug_image("03b_angle_binary", cv2.cvtColor(temp_binary, cv2.COLOR_GRAY2BGR))
         angle = self._get_skew_angle_centroid_line(temp_binary)
         self.last_skew_angles = {"centroid": float(angle)}
@@ -483,10 +436,7 @@ class CardPredictor:
         _, final_binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         final_binary = cv2.dilate(final_binary, kernel, iterations=1)
-        self._set_debug_image("05_plate_binary", cv2.cvtColor(final_binary, cv2.COLOR_GRAY2BGR))
 
-        working = self._tight_crop_plate(working)
-        self._set_debug_image("06_plate_tight_crop", working)
         working = self._normalize_plate_size(working)
         self._set_debug_image("07_plate_normalized", working)
         working = self._mild_sharpen_plate(working)
@@ -546,7 +496,7 @@ class CardPredictor:
         x1, y1, x2, y2 = map(int, boxes[best_idx].tolist())
         h, w = image_bgr.shape[:2]
         # 轻微外扩检测框，给矫正与分割保留安全边界。
-        expand = 4
+        expand = 0
         x1 = max(0, min(x1 - expand, w - 1))
         y1 = max(0, min(y1 - expand, h - 1))
         x2 = min(w, max(x2 + expand, x1 + 1))

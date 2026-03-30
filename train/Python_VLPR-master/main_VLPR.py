@@ -23,12 +23,9 @@ predictor.train_svm()
 
 PROCESS_IMAGE_TITLES = {
     "01_yolo_raw_crop": "YOLO原始裁剪",
-    "02_plate_roi": "定位车牌ROI",
-    "03_preprocess_edges": "预处理边缘图",
     "03b_angle_binary": "角度估计二值图",
     "04_plate_deskew": "车牌倾斜矫正",
-    "05_plate_binary": "车牌二值化",
-    "06_plate_tight_crop": "车牌紧致裁剪",
+    "04b_border_filled": "旋转后黑边填充",
     "07_plate_normalized": "车牌尺寸归一化",
     "07b_plate_sharpened": "车牌轻微锐化",
     "08_seg_binary": "字符分割二值图",
@@ -58,10 +55,10 @@ def _encode_image_b64(image):
 
 def _recognize_text(img_bgr):
     predictor.reset_runtime_debug()
-    first_img, oldimg = predictor.img_first_pre(img_bgr)
 
     try:
-        r_shape, _, _ = predictor.img_color_contours(first_img, oldimg, rawimg=img_bgr)
+        # 纯 YOLO 定位链路：直接使用原图做检测与 ROI 裁剪，不再依赖传统预处理输出。
+        r_shape, _, _ = predictor.img_color_contours(img_bgr, img_bgr, rawimg=img_bgr)
     except Exception:
         traceback.print_exc()
         r_shape = []

@@ -447,12 +447,9 @@
 				const fileInput = ref(null);
 				const processOrder = [
 					'01_yolo_raw_crop',
-					'02_plate_roi',
-					'03_preprocess_edges',
 					'03b_angle_binary',
 					'04_plate_deskew',
-					'05_plate_binary',
-					'06_plate_tight_crop',
+					'04b_border_filled',
 					'07_plate_normalized',
 					'07b_plate_sharpened',
 					'08_seg_binary',
@@ -461,12 +458,9 @@
 
 				const processTitleMap = {
 					'01_yolo_raw_crop': 'YOLO原始裁剪',
-					'02_plate_roi': '定位车牌ROI',
-					'03_preprocess_edges': '预处理边缘图',
 					'03b_angle_binary': '角度估计二值图',
 					'04_plate_deskew': '车牌倾斜矫正',
-					'05_plate_binary': '车牌二值化',
-					'06_plate_tight_crop': '车牌紧致裁剪',
+					'04b_border_filled': '旋转后黑边填充',
 					'07_plate_normalized': '车牌尺寸归一化',
 					'07b_plate_sharpened': '车牌轻微锐化',
 					'08_seg_binary': '字符分割二值图',
@@ -487,8 +481,7 @@
 						};
 					});
 
-					const extras = images.filter(item => !processOrder.includes(item.key));
-					return ordered.concat(extras);
+					return ordered;
 				});
 
 				const onFileChange = (e) => {
