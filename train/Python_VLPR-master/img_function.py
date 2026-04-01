@@ -180,14 +180,9 @@ class CardPredictor:
         if not ultra_root.exists():
             return None
 
-        candidates = sorted(ultra_root.glob("runs/detect/**/weights/best.pt"))
-        if candidates:
-            return candidates[-1]
-
-        fallback = ultra_root / "yolo11n.pt"
-        if fallback.exists():
-            return fallback
-        return None
+        # 仅使用用户指定模型路径，不做扫描和回退。
+        model_path = ultra_root / "runs" / "detect" / "train8" / "weights" / "best.pt"
+        return model_path if model_path.exists() else None
 
     def _ensure_yolo_detector(self):
         if self.yolo_model is not None:
@@ -195,6 +190,7 @@ class CardPredictor:
 
         model_path = self._find_default_yolo_model()
         if model_path is None:
+            print("YOLO model not found: ultralytics-SPD-SCSA/runs/detect/train8/weights/best.pt")
             return None
 
         ultra_root = Path(__file__).resolve().parents[1] / "ultralytics-SPD-SCSA"
@@ -327,48 +323,6 @@ class CardPredictor:
         edges = cv2.Canny(binary, 50, 150)
         return binary, edges
 
-    def _prepare_temp_angle_maps(self, plate_img):
-        gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (3, 3), 0)
-        _, temp_binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        edges = cv2.Canny(temp_binary, 50, 150)
-        return gray, temp_binary, edges
-
-    def _get_skew_angle_centroid_line(self, temp_binary):
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(temp_binary, connectivity=8)
-        pts = []
-        h, w = temp_binary.shape[:2]
-        min_area = max(8, int(h * w * 0.0008))
-        for i in range(1, num_labels):
-            area = stats[i, cv2.CC_STAT_AREA]
-            bw = stats[i, cv2.CC_STAT_WIDTH]
-            bh = stats[i, cv2.CC_STAT_HEIGHT]
-            if area < min_area:
-                continue
-            if bh <= 0 or bw <= 0:
-                continue
-            ratio = bw / float(bh)
-            # 过滤过细噪点和不太像字符块的连通域
-            if ratio < 0.15 or ratio > 3.5:
-                continue
-            cx, cy = centroids[i]
-            pts.append((float(cx), float(cy)))
-
-        if len(pts) < 2:
-            return 0.0
-
-        pts = np.array(pts, dtype=np.float32)
-        vx, vy, _, _ = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01)
-        angle = float(np.degrees(np.arctan2(float(vy), float(vx))))
-
-        if angle > 45:
-            angle -= 90
-        if angle < -45:
-            angle += 90
-        if abs(angle) > self.max_skew_correction_deg:
-            return 0.0
-        return angle
-
     def _deskew_plate(self, plate_img, angle):
         h, w = plate_img.shape[:2]
         center = (w // 2, h // 2)
@@ -377,8 +331,9 @@ class CardPredictor:
             plate_img,
             M,
             (w, h),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_REPLICATE,
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
         )
 
     def _estimate_skew_angle_traditional(self, plate_img):
@@ -424,9 +379,8 @@ class CardPredictor:
     def _mild_sharpen_plate(self, plate_img):
         if plate_img is None or plate_img.size == 0:
             return plate_img
-        # 使用低强度 unsharp，避免强核导致字符毛边和噪点被放大。
         blur = cv2.GaussianBlur(plate_img, (3, 3), 0)
-        return cv2.addWeighted(plate_img, 1.12, blur, -0.12, 0)
+        return cv2.addWeighted(plate_img, 1.3, blur, -0.3, 0)
 
     def _postprocess_yolo_plate_roi(self, roi):
         if roi is None or roi.size == 0:
