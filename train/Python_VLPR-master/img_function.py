@@ -316,13 +316,6 @@ class CardPredictor:
 
         return predict_result
 
-    def _prepare_plate_binary_edges(self, plate_img):
-        gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (3, 3), 0)
-        _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        edges = cv2.Canny(binary, 50, 150)
-        return binary, edges
-
     def _deskew_plate(self, plate_img, angle):
         h, w = plate_img.shape[:2]
         center = (w // 2, h // 2)
@@ -354,10 +347,6 @@ class CardPredictor:
         if abs(angle) > self.max_skew_correction_deg:
             return 0.0
         return angle
-
-    def _tight_crop_plate(self, plate_img):
-        # 禁用过度裁剪，始终返回原 ROI。
-        return plate_img
 
     def _normalize_plate_size(self, plate_img):
         target_w, target_h = self.plate_target_size
@@ -559,75 +548,3 @@ class CardPredictor:
 
         self.last_pipeline_source = "yolo_traditional_no_result"
         return [], None, None  # 识别到的字符、定位的车牌图像、车牌颜色
-
-    def img_only_color(self, filename, oldimg, img_contours):
-        """
-        :param filename: 图像文件
-        :param oldimg: 原图像文件
-        :return: 已经定位好的车牌
-        """
-        pic_hight, pic_width = img_contours.shape[:2]
-        lower_blue = np.array([100, 110, 110])
-        upper_blue = np.array([130, 255, 255])
-        lower_yellow = np.array([15, 55, 55])
-        upper_yellow = np.array([50, 255, 255])
-        lower_green = np.array([50, 50, 50])
-        upper_green = np.array([100, 255, 255])
-        hsv = cv2.cvtColor(filename, cv2.COLOR_BGR2HSV)
-        mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
-        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        mask_green = cv2.inRange(hsv, lower_yellow, upper_green)
-        output = cv2.bitwise_and(hsv, hsv, mask=mask_blue + mask_yellow + mask_green)
-        # 根据阈值找到对应颜色
-
-        output = cv2.cvtColor(output, cv2.COLOR_BGR2GRAY)
-        Matrix = np.ones((20, 20), np.uint8)
-        img_edge1 = cv2.morphologyEx(output, cv2.MORPH_CLOSE, Matrix)
-        img_edge2 = cv2.morphologyEx(img_edge1, cv2.MORPH_OPEN, Matrix)
-
-        card_contours = img_math.img_findContours(img_edge2)
-        card_imgs = img_math.img_Transform(card_contours, oldimg, pic_width, pic_hight)
-        colors, car_imgs = img_math.img_color(card_imgs)
-
-        predict_result = []
-        roi = None
-        card_color = None
-
-        for i, color in enumerate(colors):
-            if color in ("blue", "yello", "green"):
-                card_img = card_imgs[i]
-                # 颜色分支复用统一分割识别逻辑，避免第三套分割代码导致结果漂移。
-                predict_result = self._recognize_from_plate_roi(card_img, color)
-                roi = card_img
-                card_color = color
-                self.last_pipeline_source = "traditional_color"
-                break
-        return predict_result, roi, card_color  # 识别到的字符、定位的车牌图像、车牌颜色
-
-    def img_mser(self, filename):
-        if type(filename) == type(""):
-            img = img_math.img_read(filename)
-        else:
-            img = filename
-        oldimg = img
-        mser = cv2.MSER_create(_min_area=600)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        regions, boxes = mser.detectRegions(gray)
-        colors_img = []
-        for box in boxes:
-            x, y, w, h = box
-            width, height = w, h
-            if width < height:
-                width, height = height, width
-            ration = width / height
-
-            if w * h > 1500 and 3 < ration < 4 and w > h:
-                cropimg = img[y:y + h, x:x + w]
-                colors_img.append(cropimg)
-
-        debug.img_show(img)
-        colors, car_imgs = img_math.img_color(colors_img)
-        for i, color in enumerate(colors):
-            if color != "no":
-                print(color)
-                debug.img_show(car_imgs[i])
