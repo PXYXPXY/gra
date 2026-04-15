@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__author__ = '樱花落舞'
+__author__ = 'PXY'
 import os
 import sys
 from pathlib import Path
@@ -316,37 +316,42 @@ class CardPredictor:
 
         return predict_result
 
-    def _deskew_plate(self, plate_img, angle):
-        h, w = plate_img.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        return cv2.warpAffine(
-            plate_img,
-            M,
-            (w, h),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0),
-        )
+    def _draw_largest_contour_overlay(self, image):
+        if image is None or image.size == 0:
+            return image
 
-    def _estimate_skew_angle_traditional(self, plate_img):
-        gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
+        if len(image.shape) == 2:
+            vis = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            gray = image
+        else:
+            vis = image.copy()
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
         blur = cv2.GaussianBlur(gray, (3, 3), 0)
         _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
-            return 0.0
+            return vis
 
         cnt = max(contours, key=cv2.contourArea)
+        cv2.drawContours(vis, [cnt], -1, (0, 255, 255), 2)
         rect = cv2.minAreaRect(cnt)
-        angle = float(rect[-1])
-        if angle < -45:
-            angle += 90
-        if angle > 45:
-            angle -= 90
-        if abs(angle) > self.max_skew_correction_deg:
-            return 0.0
-        return angle
+        box = cv2.boxPoints(rect).astype(np.int32)
+        cv2.polylines(vis, [box], True, (0, 255, 0), 2)
+        return vis
+
+    def _draw_rect_contours_overlay(self, image, rects):
+        if image is None or image.size == 0:
+            return image
+
+        vis = image.copy()
+        if rects is None:
+            return vis
+
+        for rect in rects:
+            box = cv2.boxPoints(rect).astype(np.int32)
+            cv2.polylines(vis, [box], True, (0, 255, 255), 2)
+        return vis
 
     def _normalize_plate_size(self, plate_img):
         target_w, target_h = self.plate_target_size
@@ -376,16 +381,8 @@ class CardPredictor:
             return roi
 
         working = roi.copy()
-        angle = self._estimate_skew_angle_traditional(working)
-        self.last_skew_angles = {"centroid": float(angle)}
-
-        # 角度用于估计，但几何变换必须施加在彩色 ROI 上。
-        if abs(angle) >= self.min_skew_correction_deg:
-            working = self._deskew_plate(working, angle)
-        else:
-            working = working
-        self._set_debug_image("04_plate_deskew", working)
-        self._set_debug_image("04b_plate_deskew_refined", working)
+        # 仅保留仿射链路，不再执行角度旋转矫正。
+        self.last_skew_angles = {"centroid": 0.0}
 
         working = self._normalize_plate_size(working)
         self._set_debug_image("07_plate_normalized", working)
@@ -500,6 +497,7 @@ class CardPredictor:
         # 创建20*20的元素为1的矩阵 开操作，并和img重合
 
         ret, img_thresh = cv2.threshold(img_opening, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        self._set_debug_image("02_affine_binary", cv2.cvtColor(img_thresh, cv2.COLOR_GRAY2BGR))
         img_edge = cv2.Canny(img_thresh, 100, 200)
         # Otsu’s二值化 找到图像边缘
 
@@ -525,11 +523,13 @@ class CardPredictor:
 
             pic_hight, pic_width = roi_edges.shape[:2]
             card_contours = img_math.img_findContours(roi_edges)
+            self._set_debug_image("03_affine_detect_boxes", self._draw_rect_contours_overlay(roi_old, card_contours))
             card_imgs = img_math.img_Transform(card_contours, roi_old, pic_width, pic_hight)
             colors, _ = img_math.img_color(card_imgs)
 
             for i, color in enumerate(colors):
                 if color in ("blue", "yello", "green"):
+                    self._set_debug_image("04_affine_warp_contours", self._draw_largest_contour_overlay(card_imgs[i]))
                     refined_card = self._postprocess_yolo_plate_roi(card_imgs[i])
                     yolo_result = self._recognize_from_plate_roi(refined_card, color)
                     if len(yolo_result) > 0:

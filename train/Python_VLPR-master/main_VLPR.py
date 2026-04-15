@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__author__ = '樱花落舞'
+__author__ = 'PXY'
 
 import threading
 import time
@@ -23,8 +23,9 @@ predictor.train_svm()
 
 PROCESS_IMAGE_TITLES = {
     "01_yolo_raw_crop": "YOLO原始裁剪",
-    "04_plate_deskew": "车牌倾斜矫正",
-    "04b_plate_deskew_refined": "修改后旋转矫正图",
+    "02_affine_binary": "仿射前二值化图",
+    "03_affine_detect_boxes": "仿射前检测框图",
+    "04_affine_warp_contours": "仿射变换后轮廓图",
     "07_plate_normalized": "车牌尺寸归一化",
     "07b_plate_sharpened": "车牌轻微锐化",
     "08_seg_binary": "字符分割二值图",
