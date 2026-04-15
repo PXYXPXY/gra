@@ -390,6 +390,16 @@ class CardPredictor:
         self._set_debug_image("07b_plate_sharpened", working)
         return working
 
+    def _map_yolo_label_to_plate_color(self, label):
+        label_text = str(label).strip().lower()
+        if "large" in label_text:
+            return "yello"
+        if "new energy" in label_text or "new_energy" in label_text:
+            return "green"
+        if "regular" in label_text:
+            return "blue"
+        return "blue"
+
     def _detect_plate_with_yolo(self, image_bgr):
         yolo_model = self._ensure_yolo_detector()
         if yolo_model is None:
@@ -451,13 +461,22 @@ class CardPredictor:
         x2 = max(x1 + 1, x2)
         y2 = max(y1 + 1, y2)
 
+        best_cls_id = int(cls_ids[best_idx]) if cls_ids is not None and best_idx < len(cls_ids) else -1
+        if isinstance(names, dict):
+            best_label = str(names.get(best_cls_id, best_cls_id))
+        elif isinstance(names, list) and 0 <= best_cls_id < len(names):
+            best_label = str(names[best_cls_id])
+        else:
+            best_label = "plate"
+        plate_color = self._map_yolo_label_to_plate_color(best_label)
+
         self.last_best_box = {
             "x": x1,
             "y": y1,
             "w": max(1, x2 - x1),
             "h": max(1, y2 - y1),
             "conf": best_conf,
-            "label": self.last_detection_boxes[0]["label"] if len(self.last_detection_boxes) else "plate",
+            "label": best_label,
         }
 
         roi = image_bgr[y1:y2, x1:x2]
@@ -467,9 +486,9 @@ class CardPredictor:
         self._set_debug_image("01_yolo_raw_crop", roi)
 
         # YOLO 只负责粗定位，后续细化定位由传统方法在该 ROI 内完成。
-        return roi, "no"
+        return roi, plate_color
 
-    def img_first_pre(self, car_pic_file):
+    def img_first_pre(self, car_pic_file, plate_color=None):
         """
         :param car_pic_file: 图像文件
         :return:已经处理好的图像文件 原图像文件
@@ -497,6 +516,8 @@ class CardPredictor:
         # 创建20*20的元素为1的矩阵 开操作，并和img重合
 
         ret, img_thresh = cv2.threshold(img_opening, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if plate_color in ("green", "yello", "yellow"):
+            img_thresh = cv2.bitwise_not(img_thresh)
         self._set_debug_image("02_affine_binary", cv2.cvtColor(img_thresh, cv2.COLOR_GRAY2BGR))
         img_edge = cv2.Canny(img_thresh, 100, 200)
         # Otsu’s二值化 找到图像边缘
@@ -515,9 +536,9 @@ class CardPredictor:
 
         # 使用 YOLO 粗定位，再在 YOLO ROI 内执行传统检测细化车牌区域。
         yolo_input = rawimg if rawimg is not None else oldimg
-        yolo_roi, _ = self._detect_plate_with_yolo(yolo_input)
+        yolo_roi, yolo_color = self._detect_plate_with_yolo(yolo_input)
         if yolo_roi is not None:
-            roi_edges, roi_old = self.img_first_pre(yolo_roi)
+            roi_edges, roi_old = self.img_first_pre(yolo_roi, plate_color=yolo_color)
             if roi_edges.any():
                 config.set_name(roi_edges)
 
