@@ -353,23 +353,6 @@ class CardPredictor:
             cv2.polylines(vis, [box], True, (0, 255, 255), 2)
         return vis
 
-    def _normalize_plate_size(self, plate_img):
-        target_w, target_h = self.plate_target_size
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-
-        h, w = plate_img.shape[:2]
-        if h <= 0 or w <= 0:
-            return plate_img
-
-        # 仅在尺寸超过目标时缩小，避免对小车牌强行放大导致字符发糊。
-        scale = min(target_w / float(w), target_h / float(h))
-        if scale < 1.0:
-            new_w = max(1, int(round(w * scale)))
-            new_h = max(1, int(round(h * scale)))
-            return cv2.resize(plate_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        return plate_img
-
     def _mild_sharpen_plate(self, plate_img):
         if plate_img is None or plate_img.size == 0:
             return plate_img
@@ -383,9 +366,6 @@ class CardPredictor:
         working = roi.copy()
         # 仅保留仿射链路，不再执行角度旋转矫正。
         self.last_skew_angles = {"centroid": 0.0}
-
-        working = self._normalize_plate_size(working)
-        self._set_debug_image("07_plate_normalized", working)
         working = self._mild_sharpen_plate(working)
         self._set_debug_image("07b_plate_sharpened", working)
         return working
