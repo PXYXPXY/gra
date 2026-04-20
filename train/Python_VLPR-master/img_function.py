@@ -487,17 +487,11 @@ class CardPredictor:
         blur = 3
         img = cv2.GaussianBlur(img, (blur, blur), 0)
         oldimg = img
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # 转化成灰度图像
-
-        Matrix = np.ones((20, 20), np.uint8)
-        img_opening = cv2.morphologyEx(img, cv2.MORPH_OPEN, Matrix)
-        img_opening = cv2.addWeighted(img, 1, img_opening, -1, 0)
-        # 创建20*20的元素为1的矩阵 开操作，并和img重合
-
-        ret, img_thresh = cv2.threshold(img_opening, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # 与字符分割保持一致：灰度 -> 黄绿反色 -> OTSU
         if plate_color in ("green", "yello", "yellow"):
-            img_thresh = cv2.bitwise_not(img_thresh)
+            gray = cv2.bitwise_not(gray)
+        _, img_thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         self._set_debug_image("02_affine_binary", cv2.cvtColor(img_thresh, cv2.COLOR_GRAY2BGR))
         img_edge = cv2.Canny(img_thresh, 100, 200)
         # Otsu’s二值化 找到图像边缘
